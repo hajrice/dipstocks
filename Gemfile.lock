@@ -17,21 +17,18 @@ GEM
       rack (~> 2.2, >= 2.2.4)
       rack-protection (= 3.2.0)
       tilt (~> 2.0)
-    sqlite3 (1.6.9-x86_64-linux)
+    sqlite3 (1.6.9)
     tilt (2.3.0)
 
 PLATFORMS
-  x86_64-linux
   ruby
+  x86_64-linux
 
 DEPENDENCIES
   puma (~> 6.0)
   rack (~> 2.2)
   sinatra (~> 3.0)
   sqlite3 (~> 1.6)
-
-RUBY VERSION
-   ruby 3.2.0p0
 
 BUNDLED WITH
    2.4.1
