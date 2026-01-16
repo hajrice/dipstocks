@@ -1,24 +1,75 @@
 #!/usr/bin/env ruby
 # DIPMYASS.COM - Dip Recovery Scanner
-# Run: ruby app.rb
-# Then visit: http://localhost:4567
+# Background job scans ~2400 symbols, stores in SQLite
+# Web page reads from cache (instant)
 
 require "sinatra"
 require "net/http"
 require "json"
 require "uri"
+require "sqlite3"
 
 set :bind, '0.0.0.0'
 set :port, ENV['PORT'] || 4567
+set :show_exceptions, true
 
-# ULTRA-LIQUID US STOCKS - ~2400 symbols (Halal Compliant - No Banks/Insurance)
-FAMOUS_SYMBOLS = %w[
+# Database setup
+DB = SQLite3::Database.new('./dipmyass.db')
+DB.results_as_hash = true
+
+# Create tables
+DB.execute <<-SQL
+  CREATE TABLE IF NOT EXISTS quotes (
+    symbol TEXT PRIMARY KEY,
+    price REAL,
+    day_change REAL,
+    dip_from_open REAL,
+    recovery REAL,
+    momentum REAL,
+    range_position REAL,
+    star INTEGER,
+    updated_at INTEGER
+  )
+SQL
+
+DB.execute <<-SQL
+  CREATE TABLE IF NOT EXISTS movers (
+    symbol TEXT PRIMARY KEY,
+    name TEXT,
+    price REAL,
+    day_change REAL,
+    dip_from_open REAL,
+    recovery REAL,
+    momentum REAL,
+    range_position REAL,
+    market_cap REAL,
+    mover_type TEXT,
+    star INTEGER,
+    updated_at INTEGER
+  )
+SQL
+
+DB.execute <<-SQL
+  CREATE TABLE IF NOT EXISTS scan_status (
+    id INTEGER PRIMARY KEY,
+    last_scan_at INTEGER,
+    symbols_scanned INTEGER,
+    scan_duration REAL
+  )
+SQL
+
+# Initialize scan status
+DB.execute("INSERT OR IGNORE INTO scan_status (id, last_scan_at, symbols_scanned, scan_duration) VALUES (1, 0, 0, 0)")
+
+# ~2400 Ultra-Liquid US Symbols (Halal Compliant - No Banks/Insurance)
+ALL_SYMBOLS = %w[
   A AA AAL AAOI AAP AAPL AAWW ABBV ABCL ABG ABM ABNB ABT ACB ACC ACCO ACHC ACHR ACLS ACLX ACM ACMR ACN ADAP ADBE ADC ADCT ADI ADNT ADP ADPT ADSK ADUS ADVM AECOM AEE AEHR AEM AEO AEP AES AFRM AGCO AGFY AGG AGI AGIO AGS AGX AHH AI AIMC AIR AIRC AIRI AIRT AIV AJG AJRD AKAM AKR AKRO AKUS ALB ALDX ALEX ALG ALGM ALGN ALGT ALK ALLE ALLK ALNY ALSN ALTM ALTR ALV AM AMAT AMBA AMC AMCR AMCX AMD AME AMED AMEH AMGN AMH AMKR AMN AMPS AMPY AMRC AMRS AMSC AMT AMTI AMWD AMZN AN ANDE ANF ANGI ANGO ANIK ANIP ANNX ANSS AORT AOS AOSL APA APD APEI APEN APGE APH APLE APLS APOG APPF APPN APPS APTO APTS APTV AQN AR ARBK ARCB ARCO ARCT ARD ARDX ARE ARGX ARKG ARMK ARNC ARQT ARRY ARVL ARWR ASAN ASGN ASH ASHR ASIX ASO ASTC ASTE ASTI ASX ATGE ATHA ATI ATMU ATO ATR ATRC ATRO ATSG ATUS ATXG AU AURA AUTL AVA AVAV AVB AVGO AVIR AVNS AVPT AVXL AVY AWI AWK AWR AXL AXNX AXON AXSM AXTA AY AYI AYX AZEK AZN AZO B BA BABA BAH BALL BALY BAND BASE BATL BBWI BBY BC BCC BCPC BCRX BCYC BDN BDSX BDX BE BEAM BECN BEP BEPC BERY BF.A BF.B BFAM BFLY BFS BG BGFV BGNE BHP BHVN BIG BIGC BIIB BILL BIO BIOR BIP BIPC BITF BIV BJRI BKD BKH BKNG BKR BLDP BLDR BLL BLMN BLNK BLTE BLUE BLV BMBL BMC BMRN BMY BND BNED BNO BNTC BNTX BOIL BOOT BORR BOX BPYU BR BRFS BRG BRK.B BRKS BRO BROS BRX BRZE BSET BSV BSX BTBT BTCS BTI BTSG BTU BUD BURL BUSE BV BVN BWA BWEN BWXT BXC BXMT BXP BYD BYON BZH CABO CACC CADE CAG CAKE CAL CALM CALX CAMT CAN CANE CAPL CARA CARG CARR CARS CART CAT CBAY CBOE CBRE CBRL CBT CBZ CC CCI CCJ CCK CCL CCOI CCRN CCS CDAY CDEV CDLX CDN CDNS CE CECO CEG CELH CENT CENTA CENX CEPU CEQP CERE CEVA CF CFFN CFLT CFX CGC CGEM CGNX CHAP CHD CHDN CHE CHEF CHGG CHH CHK CHPT CHRD CHRS CHRW CHS CHTR CHUY CHWY CIEN CIFR CIGI CINT CIVI CL CLB CLBT CLDX CLF CLFD CLLS CLNC CLNE CLOV CLPR CLSD CLSK CLVR CLX CMA CMC CMCO CMCSA CME CMG CMI CMP CMPS CMS CNCE CNHI CNI CNK CNP CNSL CNTB CNX CNXC COGT COHR COHU COIN COKE COLD COLM COM COMM COMP CONN COP COPX COR CORN CORT CORZ COST COTY COUP COUR CP CPA CPB CPE CPER CPNG CPRI CPRT CPRX CPS CPT CQQQ CRAI CRBU CRDO CRGY CRH CRI CRL CRM CRON CROX CRS CRSP CRTX CRUS CRVL CRWD CSCO CSGP CSIQ CSR CSTM CSWI CSX CTAS CTB CTO CTRA CTRE CTRN CTSH CTVA CUB CUBE CUT CUTR CUZ CVE CVLG CVNA CVS CVX CW CWAN CWEN CWEN.A CWH CWT CYBR CYH CYT CZR D DAC DAL DAN DARE DASH DAWN DBA DBC DBO DCFC DCGO DCI DCO DCPH DCT DD DDM DDOG DE DECK DEI DELL DEN DENN DEO DG DGII DGRO DGX DHI DHR DIA DIGI DIOD DIS DISCA DISCK DISH DJP DK DKNG DKS DLA DLB DLO DLR DLTH DLTR DLX DMAC DMGI DNB DNLI DNN DNOW DNR DNUT DO DOC DOCN DOCU DOG DOOR DORM DOV DOW DPZ DQ DRD DRE DRH DRI DRIV DRMA DRQ DRVN DSGX DSKE DSX DT DTE DTM DUK DUOL DUST DV DVA DVAX DVN DVY DWDP DXCM DXD E EA EAT EBAY EBON ECHO ECL ED EDIT EDR EDU EEFT EEM EFA EFX EGLE EGO EHC EIX EL ELBM ELF ELME ELP ELS ELVN EMB EME EMN EMR ENLC ENOB ENPH ENSG ENTG ENTX ENVX EOG EOLS EOSE EPAM EPD EPIQ EPR EPRT EQIX EQR EQT ERJ ES ESAB ESI ESRT ESS ESTA ESTC ESTE ET ETN ETNB ETR ETSY EVAX EVC EVCM EVGO EVH EVLO EVLV EVOK EVRG EVRI EVTC EW EWA EWC EWG EWH EWJ EWS EWT EWU EWY EWZ EXAI EXC EXEL EXLS EXP EXPD EXPE EXPO EXPR EXR F FANG FAR FAST FATE FBHS FBIN FBRX FCEL FCN FCPT FCX FDS FDX FE FELE FERG FF FFIV FGEN FHTX FICO FIS FISV FIVE FIVN FIX FIZZ FL FLNG FLO FLOW FLR FLS FLT FLYW FMC FNKO FNV FOE FOLD FORM FOUR FOX FOXA FOXF FPI FR FRAC FRAN FREY FREYR FRHC FRME FROG FRPT FRSH FRT FSLR FSLY FSR FSS FTCI FTEC FTI FTNT FTS FTV FUL FULC FUN FUSN FUTU FVRR FWONA FWONK FWRD FWRG FXI FYBR GALT GBIO GCI GCP GCTI GD GDDY GDEN GDRX GDX GDXJ GE GEF GEF.B GEHC GEN GENI GERN GEVO GFF GFI GFL GGG GH GHC GIII GIL GILD GILT GIS GKOS GLBE GLD GLIBA GLNCY GLNG GLOB GLPG GLPI GLUE GLW GM GMAB GME GMED GMS GNCA GNE GNK GNL GNRC GNTX GO GOEV GOGL GOLD GOOD GOOG GOOGL GOOS GOSS GOTU GOVT GPC GPI GPK GPN GPOR GPRE GPS GRA GRCL GREE GRIN GRMN GRP GRPN GRTS GRWG GSAT GSG GSK GT GTE GTES GTHX GTLB GTLS GTN GTWN GTX GTY GVA GWW H HA HAE HAIN HAL HARP HAS HASI HAYN HAYW HBI HCA HD HDS HE HEI HEI.A HELE HES HESM HEXO HFC HGEN HIBB HIFR HII HIMS HIMX HIVE HIW HL HLF HLIO HLT HLTH HLX HMG HMHC HMPT HMY HNGR HNI HNNA HNST HOG HOLX HON HOOD HP HPE HPK HPP HPQ HQI HR HRL HRMY HRTX HSC HSIC HSKA HST HSY HT HTA HTLD HUBB HUBG HUBS HUN HURN HUT HWKN HWM HXL HYG HYLN HZNP IAC IAG IART IAS IAU IAUX IBB IBM IBP ICE ICFI ICHR ICLR ICPT ICUI IDA IDT IDU IDXX IEF IEFA IEMG IEX IFF IFRX IGMS IGT IGV IHG IHRT IIIV IIPR IJH IJR IMAB IMAX IMCR IMGN IMMP IMPP IMRX IMUX IMVT IMXI INBX INCY INDA INDI INDY INFI INFN INFO INFY INGR INMB INN INNV INO INSG INSM INSP INTC INTU INVH IONS IOSP IOVA IP IPAR IPG IQ IR IRBT IRC IRDM IREN IRM IRT IRTC IRWD ISEE ISRG ISSC ISTR IT ITCI ITGR ITOS ITOT ITRM ITT ITW IUSG IUSV IVE IVR IVV IVW IWB IWD IWF IWM IWV IYC IYE IYH IYJ IYK IYM IYR IYW IYZ J JACK JAKK JAMF JANX JAZZ JBGS JBHT JBLU JBSS JBT JCI JD JDST JE JELD JILL JJSF JKHY JKS JNJ JNK JNPR JNUG JO JOBY JOUT K KAI KALU KAMN KAR KARO KATE KBAL KBR KCNY KDNY KDP KEP KEX KEYS KFRC KGC KHC KIDS KIM KIND KL KLAC KLIC KMB KMG KMI KMT KMX KNBE KNF KNSA KNTE KNX KO KOLD KOP KOS KPTI KR KRA KRC KREF KRG KRNT KRO KRON KROS KRTX KRUS KRYS KTB KTOS KTRA KVYO KWEB KWR KYMR LABP LAD LANC LASR LAUR LAZR LBPH LBRDA LBRDK LBTYA LBTYB LBTYK LBY LC LCID LCII LDOS LEA LEG LEGN LEN LEU LEV LEVI LGF.A LGF.B LGIH LGND LH LHX LI LICY LII LILA LILAK LILM LIN LINC LITE LIVN LKQ LLY LMND LMNL LMT LNC LNDC LNG LNGG LNN LNT LNW LOCO LODE LOPE LOVE LOW LPCN LPRO LPTX LPX LQD LQDA LRCX LRN LSCC LSI LSPD LSTR LSXMA LSXMB LSXMK LTC LTHM LULU LUMN LUNG LUV LVS LW LXP LXU LYB LYEL LYFT LYV MA MAA MAC MACK MACOM MAG MANT MANU MAR MARA MARPS MAS MASI MAT MATX MAXN MAXR MBLY MBUU MCD MCFT MCHI MCHP MCO MCRI MCS MDB MDC MDGL MDLZ MDRR MDRX MDT MDXG MDXH MDY MEDP MEET MELI MEMO MEOH META MFA MGA MGEE MGI MGM MGNI MGP MGPI MGTA MGTX MHH MHK MIDD MIR MIRM MKC MKTX MLHR MLM MLYS MMM MMS MMSI MMYT MNDY MNR MNST MO MOD MOG.A MOG.B MORF MORN MOS MOV MP MPC MPLX MPWR MPX MQ MRC MRCY MREO MRK MRNA MRO MRSN MRTN MRTX MRUS MRVL MSCI MSFT MSGN MSI MSTR MTA MTCH MTD MTDR MTEM MTN MTOR MTSI MTTR MTUM MTX MTZ MU MUB MUR MWA MXL MYE MYOV MYPS MYRG NABL NAKD NAMS NAOV NARI NATR NBIX NCLH NCMGY NCNA NCNO NCSB NDAQ NDLS NDSN NEE NEM NEP NET NEU NEWM NEWR NEXA NEXT NFE NFLX NGL NGLOY NGVT NHC NI NIB NICE NIO NJR NKE NKLA NKTX NLSN NMFC NMRK NMTR NNN NNOX NOBL NOC NOTV NOV NOVA NOW NPK NPO NRDS NREF NRG NRP NRT NRZ NS NSA NSC NSSC NTAP NTLA NTNX NTR NTRA NU NUE NUGT NUS NUTR NUVA NVAX NVCR NVDA NVO NVR NVRO NVS NVST NVTA NVTS NWE NWL NWN NWPX NWS NWSA NX NXGN NXPI NXST NYT O OABI OAS OC OCEA OCGN OCUL ODC ODFL OEC OFC OFIX OFLX OGE OGI OGN OGS OHI OI OIH OII OIS OKE OKTA OLED OLLI OLN OLO OLP OMC OMCL OMER OMF OMI ON ONCT ONCX ONEW ONMD ONON ONTO OPCH OPEN OPI OPRX OR ORA ORC ORCL ORIC ORLY ORMP ORTX OSH OSIS OSPN OSTK OSUR OTIS OTTR OVID OVV OXM OXY PAA PAAS PACB PACK PACT PAG PAGS PALL PAND PANW PARA PARR PASG PATH PATK PAYC PAYO PAYX PBF PBFX PBT PCAR PCG PCRX PCTY PCY PCYO PD PDBC PDCE PDCO PDD PDFS PDM PDS PDSB PEAK PEB PECK PECO PEG PEGA PENN PEP PEPG PERI PFE PFGC PG PGEN PGRE PGTI PH PHAT PHGE PHIO PHM PHR PII PINC PINS PIRS PK PKG PKI PLAB PLAN PLAY PLD PLL PLNT PLRX PLSE PLTR PLUG PLXS PLYA PLYM PM PMT PNM PNR PNST PNW PODD POL POOL POR POSH POST POWI PPBB PPBI PPC PPG PPL PPLT PQG PRAX PRCH PRCT PRDO PRGO PRIM PRM PRPL PRSC PRSE PRTA PRTX PRTY PRVB PRZO PSA PSB PSD PSEG PSFE PSMT PSN PSNL PSO PSQ PSTG PSTL PSX PSXP PTAC PTC PTCT PTEN PTER PTGX PTLO PTRA PUBM PUMP PVG PVH PWR PXD PXMD PYPL PZZA QCOM QDEL QLD QLYS QNRX QQQ QRTEA QRVO QS QSR QTS QUAL QUIK QUOT QURE R RAD RADL RAIL RAPT RARE RAVE RBBN RBC RBLX RBRK RC RCEL RCKT RCL RCM RCUS RDDT RDFN RDHL RDNT REE REG REGN REI RELY REPL RES RETA REVG REX REXR REYN RGLD RGNX RGR RGS RH RHP RICK RIDE RIGL RIO RIOT RIVN RJF RL RLGT RLJ RLMD RMBS RMCF RMD RMNI RNA RNG RNGR ROCK ROG ROIC ROIV ROK ROKU ROL ROLL ROOT ROP ROST RPAI RPAY RPD RPID RPM RRC RRGB RRR RS RSI RSKD RSP RTH RTX RUBI RUBY RUN RUSHA RUSHB RUTH RVI RVLV RVMD RVNC RXDX RXN RXRX RYAAY RYN RYTM S SA SAFE SAFM SAGE SAH SAIA SAIC SAIL SALT SAM SANA SAND SATS SAVA SAVE SBAC SBGI SBLK SBR SBRA SBS SBUX SCG SCHA SCHB SCHD SCHG SCHL SCHM SCHP SCHV SCHX SCHZ SCL SCO SCOR SCPH SCS SCVL SD SDGR SDIG SDOW SDP SDRL SDS SDY SE SEAL SEAS SEDG SEE SEEL SEM SESN SFM SG SGC SGMO SGRY SGU SH SHAK SHC SHEN SHI SHLS SHO SHOO SHOP SHSP SHW SHY SHYF SHYG SIBN SID SIL SILJ SILK SIMO SIRI SITM SIX SIZE SJI SJM SJW SKIS SKLZ SKT SKX SKY SKYW SLAB SLB SLCA SLDP SLG SLGN SLV SM SMAR SMCI SMG SMH SMIN SMMT SMPL SMTC SMWB SN SNA SNAP SNBR SNCY SNDL SNDR SNDX SNMP SNOW SNPS SNSE SNY SO SOFI SOI SON SOS SOXX SOYB SPB SPG SPGI SPHR SPKE SPLG SPLK SPMD SPOT SPPI SPR SPRB SPSM SPTL SPTM SPTN SPTS SPWH SPWR SPXC SPXL SPXU SPY SPYG SPYV SQ SQM SQQQ SQSP SR SRC SRDX SRE SRG SRI SRPT SRRK SRTY SSB SSO SSP SSRM STAA STAG STAR STE STEM STIP STKL STKS STLA STLD STNE STNG STOK STOR STPR STRA STRL STRO STWD STX STZ SUB SUI SUM SUMO SUN SURF SVM SVRA SVXY SWAV SWC SWK SWKS SWN SWTX SWX SXI SXT SYBX SYF SYK SYNA SYNH SYRS SYY T TAC TACO TACS TAHO TAK TAL TALO TALS TAP TARA TARS TASK TAST TBF TBLA TBT TCMD TCO TCOM TCRR TDG TDW TDY TEAM TECK TEGN TEL TELA TELL TENB TER TEVA TEX TFFP TGAN TGI TGNA TGS TGT TGTX THC THO THRM THRX THS TIGR TILE TIP TITN TJX TKO TLRY TLT TMDX TMF TMO TMUS TMV TNA TNC TNDM TNET TNK TNL TNXP TOPS TOST TPIC TPL TPR TPTX TPVG TPX TQQQ TR TRDA TREX TRGP TRI TRIB TRIP TRMB TRMD TRNO TRNS TROX TRP TRQ TRS TRU TRUE TSCO TSE TSLA TSM TSN TT TTC TTD TTEC TTEK TTGT TTI TTOO TTWO TU TVTX TWIN TWLO TWNK TWOU TXMD TXN TXRH TXT TYL TYRA TZA U UA UAA UAL UAN UAVS UBA UBER UCO UDMY UDOW UDR UE UEC UFPI UFPT UGI UHAL UHS UHT ULBI ULH ULTA UMAB UMC UMH UNFI UNG UNH UNIT UNL UNP UNVR UPLD UPRO UPS UPST UPWK URA URBN URG URGN URNM URTY USAC USCR USFD USHY USL USLM USM USMV USNA USO USPH USX UTHR UTI UTZ UUUU UVXY UWMC V VAL VALE VAPO VAW VB VBIV VBK VBR VC VCEL VCIT VCLT VCNX VCR VCSH VCYT VDC VDE VEA VEDL VEEV VER VERA VERU VERV VET VFC VFF VGIT VGK VGLT VGSH VGT VHI VHT VIAC VIAV VIAVI VICI VIG VIRT VIS VITL VIXY VKTX VLCN VLO VLSI VLUE VMC VNCE VNDA VNET VNO VNOM VNQ VNRX VNTR VO VOO VOX VPL VPU VRAY VRCA VRDN VRE VRM VRNA VRNS VRSK VRSN VRTX VSAT VSEC VST VTEB VTEX VTI VTIP VTLE VTR VTRS VTV VTVT VUG VVV VWO VWOB VWS VXRT VXUS VXX VZ W WAB WAT WATT WBA WBD WBT WD WDAY WDC WDFC WEAT WEC WELL WEN WERN WES WEX WFRD WGL WGO WH WHD WING WISH WIT WK WKHS WLFC WLK WLL WM WMB WMG WMS WMT WOLF WOOD WOR WPC WPM WPX WRE WRI WRK WSM WSO WSR WST WTI WTR WTRG WTS WU WWD WWE WWW WY WYNN X XAIR XBI XBIT XCUR XEL XELA XENE XENT XERS XFOR XHR XLB XLC XLE XLI XLK XLP XLRE XLU XLV XLY XNCR XNET XOM XOMA XOP XPEL XPER XPEV XPO XPRO XRAY XRT XYL YELP YETI YEXT YMAB YMM YORW YUM YY Z ZBH ZBRA ZD ZETA ZEUS ZG ZI ZIM ZLAB ZM ZNTL ZS ZTO ZTS ZUO ZVO ZYME ZYXI
 ]
 
 TOP_N = 20
-MIN_MARKET_CAP = 10_000_000_000 # $10B minimum
+MIN_MARKET_CAP = 10_000_000_000
 
+# Fetch quote for a single symbol
 def fetch_quote(symbol)
   url = "https://query1.finance.yahoo.com/v8/finance/chart/#{symbol}?interval=1m&range=1d"
   uri = URI(url)
@@ -51,33 +102,41 @@ def fetch_quote(symbol)
   day_low = meta["regularMarketDayLow"] || closes.min
   
   return nil unless current && prev_close && prev_close > 0
+  return nil unless day_low && day_low > 0
   
   day_change = ((current - prev_close) / prev_close) * 100
   open_price = meta["regularMarketOpen"] || closes.first
+  return nil unless open_price && open_price > 0
+  
   dip_from_open = ((day_low - open_price) / open_price) * 100
   recovery_from_low = ((current - day_low) / day_low) * 100
   
   recent_avg = closes[-5..-1].sum / 5.0
   earlier_avg = closes[-10..-6].sum / 5.0
+  return nil unless earlier_avg > 0
+  
   momentum = ((recent_avg - earlier_avg) / earlier_avg) * 100
   
   range = day_high - day_low
   position_in_range = range > 0 ? ((current - day_low) / range) * 100 : 50
   
+  star = (dip_from_open < -0.5 && momentum > 0.02 && position_in_range < 60) ? 1 : 0
+  
   {
     symbol: symbol,
-    price: current,
+    price: current.round(2),
     day_change: day_change.round(2),
     dip_from_open: dip_from_open.round(2),
     recovery: recovery_from_low.round(2),
     momentum: momentum.round(3),
     range_position: position_in_range.round(0),
-    star: (dip_from_open < -0.5 && momentum > 0.02 && position_in_range < 60)
+    star: star
   }
 rescue => e
   nil
 end
 
+# Fetch top movers from Yahoo
 def fetch_top_movers
   movers = []
   
@@ -110,8 +169,7 @@ def fetch_top_movers
           price: q["regularMarketPrice"],
           day_change: q["regularMarketChangePercent"]&.round(2),
           market_cap: market_cap,
-          volume: q["regularMarketVolume"],
-          type: type == "gainers" ? :gainer : :loser
+          mover_type: type
         }
       end
     rescue => e
@@ -122,81 +180,193 @@ def fetch_top_movers
   movers
 end
 
-def scan_famous_stocks
-  results = []
-  
-  threads = FAMOUS_SYMBOLS.map do |sym|
-    Thread.new { fetch_quote(sym) }
-  end
-  
-  results = threads.map(&:value).compact
-  
-  dip_recoveries = results.select do |r|
-    r[:dip_from_open] < -0.1 &&
-    r[:momentum] > 0 &&
-    r[:recovery] > 0.05 &&
-    r[:range_position] < 85
-  end
-  
-  dip_recoveries.sort_by { |r| -r[:momentum] }.first(TOP_N)
+# Save quote to database
+def save_quote(q)
+  return unless q
+  DB.execute(
+    "INSERT OR REPLACE INTO quotes (symbol, price, day_change, dip_from_open, recovery, momentum, range_position, star, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [q[:symbol], q[:price], q[:day_change], q[:dip_from_open], q[:recovery], q[:momentum], q[:range_position], q[:star], Time.now.to_i]
+  )
 end
 
-def scan_top_movers
-  movers = fetch_top_movers
-  return { gainers: [], losers: [], dip_recoveries: [] } if movers.empty?
+# Save mover to database
+def save_mover(m, quote)
+  return unless m
+  star = 0
+  dip = nil
+  momentum = nil
+  range_pos = nil
+  recovery = nil
   
-  # Get detailed dip/recovery data for each mover
-  symbols = movers.map { |m| m[:symbol] }
-  
-  threads = symbols.map do |sym|
-    Thread.new { [sym, fetch_quote(sym)] }
+  if quote
+    dip = quote[:dip_from_open]
+    momentum = quote[:momentum]
+    range_pos = quote[:range_position]
+    recovery = quote[:recovery]
+    star = quote[:star]
   end
   
-  quote_data = threads.map(&:value).to_h
-  
-  # Merge mover data with quote data
-  enriched = movers.map do |m|
-    quote = quote_data[m[:symbol]]
-    next m unless quote
-    
-    m.merge(
-      dip_from_open: quote[:dip_from_open],
-      momentum: quote[:momentum],
-      range_position: quote[:range_position],
-      recovery: quote[:recovery],
-      star: quote[:star]
-    )
-  end.compact
-  
-  # Filter for dip recovery pattern among movers
-  dip_recoveries = enriched.select do |r|
-    r[:dip_from_open] && r[:dip_from_open] < -0.1 &&
-    r[:momentum] && r[:momentum] > 0 &&
-    r[:recovery] && r[:recovery] > 0.05 &&
-    r[:range_position] && r[:range_position] < 85
+  DB.execute(
+    "INSERT OR REPLACE INTO movers (symbol, name, price, day_change, dip_from_open, recovery, momentum, range_position, market_cap, mover_type, star, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    [m[:symbol], m[:name], m[:price], m[:day_change], dip, recovery, momentum, range_pos, m[:market_cap], m[:mover_type], star, Time.now.to_i]
+  )
+end
+
+# Background scanner
+def run_background_scan
+  Thread.new do
+    loop do
+      begin
+        start_time = Time.now
+        puts "[Scanner] Starting scan of #{ALL_SYMBOLS.size} symbols..."
+        
+        # Scan in batches with threading
+        ALL_SYMBOLS.each_slice(50) do |batch|
+          threads = batch.map do |sym|
+            Thread.new do
+              quote = fetch_quote(sym)
+              save_quote(quote) if quote
+            end
+          end
+          threads.each(&:join)
+          sleep 0.1 # Small delay between batches
+        end
+        
+        # Scan top movers
+        puts "[Scanner] Fetching top movers..."
+        movers = fetch_top_movers
+        movers.each do |m|
+          quote = fetch_quote(m[:symbol])
+          save_mover(m, quote)
+        end
+        
+        duration = Time.now - start_time
+        DB.execute("UPDATE scan_status SET last_scan_at = ?, symbols_scanned = ?, scan_duration = ? WHERE id = 1", 
+                   [Time.now.to_i, ALL_SYMBOLS.size, duration.round(1)])
+        
+        puts "[Scanner] Completed scan in #{duration.round(1)}s. Sleeping 30s..."
+        sleep 30
+        
+      rescue => e
+        puts "[Scanner] Error: #{e.message}"
+        sleep 10
+      end
+    end
   end
+end
+
+# Get dip recoveries from cache
+def get_famous_dip_recoveries
+  rows = DB.execute(<<-SQL)
+    SELECT * FROM quotes 
+    WHERE dip_from_open < -0.1 
+      AND momentum > 0 
+      AND recovery > 0.05 
+      AND range_position < 85
+      AND updated_at > #{Time.now.to_i - 300}
+    ORDER BY momentum DESC
+    LIMIT #{TOP_N}
+  SQL
+  
+  rows.map do |r|
+    {
+      symbol: r['symbol'],
+      price: r['price'],
+      day_change: r['day_change'],
+      dip_from_open: r['dip_from_open'],
+      recovery: r['recovery'],
+      momentum: r['momentum'],
+      range_position: r['range_position'],
+      star: r['star'] == 1
+    }
+  end
+end
+
+# Get top movers from cache
+def get_movers_from_cache
+  gainers = DB.execute("SELECT * FROM movers WHERE mover_type = 'gainers' AND updated_at > #{Time.now.to_i - 300} ORDER BY day_change DESC LIMIT #{TOP_N}")
+  losers = DB.execute("SELECT * FROM movers WHERE mover_type = 'losers' AND updated_at > #{Time.now.to_i - 300} ORDER BY day_change ASC LIMIT #{TOP_N}")
+  
+  dip_recoveries = DB.execute(<<-SQL)
+    SELECT * FROM movers 
+    WHERE dip_from_open < -0.1 
+      AND momentum > 0 
+      AND recovery > 0.05 
+      AND range_position < 85
+      AND updated_at > #{Time.now.to_i - 300}
+    ORDER BY momentum DESC
+    LIMIT #{TOP_N}
+  SQL
+  
+  format_movers = ->(rows) {
+    rows.map do |r|
+      {
+        symbol: r['symbol'],
+        name: r['name'],
+        price: r['price'],
+        day_change: r['day_change'],
+        dip_from_open: r['dip_from_open'],
+        recovery: r['recovery'],
+        momentum: r['momentum'],
+        range_position: r['range_position'],
+        market_cap: r['market_cap'],
+        star: r['star'] == 1
+      }
+    end
+  }
   
   {
-    gainers: enriched.select { |m| m[:type] == :gainer }.sort_by { |m| -(m[:day_change] || 0) }.first(TOP_N),
-    losers: enriched.select { |m| m[:type] == :loser }.sort_by { |m| m[:day_change] || 0 }.first(TOP_N),
-    dip_recoveries: dip_recoveries.sort_by { |r| -(r[:momentum] || 0) }.first(TOP_N)
+    gainers: format_movers.call(gainers),
+    losers: format_movers.call(losers),
+    dip_recoveries: format_movers.call(dip_recoveries)
   }
 end
 
+def get_scan_status
+  row = DB.execute("SELECT * FROM scan_status WHERE id = 1").first
+  return { last_scan: "Never", symbols: 0, duration: 0 } unless row
+  
+  last_scan = row['last_scan_at'] > 0 ? Time.at(row['last_scan_at']).strftime('%H:%M:%S') : "Scanning..."
+  {
+    last_scan: last_scan,
+    symbols: row['symbols_scanned'],
+    duration: row['scan_duration']
+  }
+end
+
+def format_market_cap(cap)
+  return "N/A" unless cap
+  if cap >= 1_000_000_000_000
+    "$#{(cap / 1_000_000_000_000.0).round(2)}T"
+  elsif cap >= 1_000_000_000
+    "$#{(cap / 1_000_000_000.0).round(1)}B"
+  else
+    "$#{(cap / 1_000_000.0).round(0)}M"
+  end
+end
+
+# Start background scanner on boot
+run_background_scan
+
+# Routes
 get '/' do
-  @famous = scan_famous_stocks
-  @movers = scan_top_movers
-  @scan_time = Time.now.strftime('%H:%M:%S')
+  @famous = get_famous_dip_recoveries
+  @movers = get_movers_from_cache
+  @status = get_scan_status
   erb :index
 end
 
 get '/api' do
   content_type :json
   {
-    famous_stocks: scan_famous_stocks,
-    top_movers: scan_top_movers,
-    scanned_at: Time.now.iso8601
+    famous_stocks: get_famous_dip_recoveries,
+    top_movers: get_movers_from_cache,
+    status: get_scan_status
   }.to_json
+end
+
+get '/health' do
+  "OK"
 end
 
 helpers do
@@ -247,7 +417,6 @@ __END__
       overflow-x: hidden;
     }
     
-    /* Snowflakes */
     .snowflake {
       position: fixed;
       top: -10px;
@@ -312,12 +481,6 @@ __END__
       animation: twinkle 1.5s ease-in-out infinite;
     }
     
-    .logo-img {
-      max-width: 280px;
-      height: auto;
-      margin-bottom: 10px;
-    }
-    
     .logo { 
       font-size: 42px; 
       font-weight: 800;
@@ -347,23 +510,27 @@ __END__
       font-size: 10px;
     }
     
-    .section {
-      margin-bottom: 50px;
+    .scan-status {
+      background: #0f1a0f;
+      border: 1px solid #1a2f1a;
+      border-radius: 6px;
+      padding: 10px 15px;
+      display: inline-block;
+      margin-top: 15px;
+      font-size: 12px;
+      color: #666;
     }
+    .scan-status .live { color: #4ade80; }
+    
+    .section { margin-bottom: 50px; }
     .section-header {
       display: flex;
       align-items: center;
       gap: 12px;
       margin-bottom: 20px;
     }
-    .section-icon {
-      font-size: 24px;
-    }
-    h2 { 
-      color: #fff; 
-      font-size: 20px; 
-      font-weight: 600;
-    }
+    .section-icon { font-size: 24px; }
+    h2 { color: #fff; font-size: 20px; font-weight: 600; }
     .section-desc {
       color: #666;
       font-size: 13px;
@@ -402,28 +569,15 @@ __END__
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
-    td { 
-      padding: 12px;
-      border-bottom: 1px solid #1a2f1a;
-    }
+    td { padding: 12px; border-bottom: 1px solid #1a2f1a; }
     tr:hover { background: rgba(34, 139, 34, 0.1); }
     tr:last-child td { border-bottom: none; }
     
     .positive { color: #4ade80; }
     .negative { color: #f87171; }
     .star { color: #ffd700; }
-    .symbol { 
-      font-weight: 600; 
-      color: #fff;
-    }
-    .name {
-      color: #666;
-      font-size: 12px;
-      max-width: 200px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
+    .symbol { font-weight: 600; color: #fff; }
+    .name { color: #666; font-size: 12px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .price { color: #ccc; }
     .market-cap { color: #888; font-size: 12px; }
     
@@ -435,18 +589,9 @@ __END__
       border-radius: 8px;
       border: 1px solid #1a2f1a;
     }
-    .empty::before {
-      content: '🎅';
-      display: block;
-      font-size: 40px;
-      margin-bottom: 15px;
-    }
+    .empty::before { content: '🎅'; display: block; font-size: 40px; margin-bottom: 15px; }
     
-    .tabs {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 20px;
-    }
+    .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
     .tab {
       padding: 10px 20px;
       background: #0f1a0f;
@@ -490,7 +635,6 @@ __END__
   </style>
 </head>
 <body>
-  <!-- Snowflakes -->
   <div class="snowflake">❄</div>
   <div class="snowflake">❄</div>
   <div class="snowflake">❄</div>
@@ -508,29 +652,31 @@ __END__
       <div class="logo"><span class="dip">Dip</span><span class="my">My</span><span class="ass">Ass</span>.com</div>
       <p class="tagline">Catch the bounce. <span class="accent">Ride the recovery.</span> 🎁</p>
       <div class="meta">
-        <span>Last scan: <%= @scan_time %></span>
-        <span>Auto-refresh: 30s</span>
+        <span>Last scan: <%= @status[:last_scan] %></span>
+        <span>Watching: <%= @status[:symbols] %> symbols</span>
         <span>$10B+ market cap only</span>
+      </div>
+      <div class="scan-status">
+        <span class="live">●</span> Background scanner running — refreshes every 30s
       </div>
     </div>
     
-    <!-- FAMOUS STOCKS SECTION -->
     <div class="section">
       <div class="section-header">
         <span class="section-icon">🎁</span>
         <h2>DipMyAss Famous Stocks</h2>
       </div>
-      <p class="section-desc">Ultra-liquid assets (SPY, QQQ, mega-caps) showing dip recovery patterns</p>
+      <p class="section-desc">~2400 ultra-liquid assets showing dip recovery patterns</p>
       
       <div class="strategy">
-        <span>Strategy:</span> Find famous stocks that DIPPED but are NOW recovering<br>
+        <span>Strategy:</span> Find stocks that DIPPED but are NOW recovering<br>
         <span>Filter:</span> Dipped from open + Positive momentum + Not at day high
       </div>
       
       <% if @famous.empty? %>
         <div class="empty">
-          <p>No dip-recovery patterns in famous stocks right now.</p>
-          <p>Market may be flat, closed, or no clear setups.</p>
+          <p>No dip-recovery patterns detected yet.</p>
+          <p>Scanner is warming up or market may be flat/closed.</p>
         </div>
       <% else %>
         <table>
@@ -550,13 +696,13 @@ __END__
                 <td class="symbol">
                   <% if r[:star] %><span class="star">⭐ </span><% end %><%= r[:symbol] %>
                 </td>
-                <td class="price">$<%= sprintf('%.2f', r[:price]) %></td>
-                <td class="<%= r[:day_change] >= 0 ? 'positive' : 'negative' %>">
-                  <%= sprintf('%+.2f%%', r[:day_change]) %>
+                <td class="price">$<%= sprintf('%.2f', r[:price] || 0) %></td>
+                <td class="<%= (r[:day_change] || 0) >= 0 ? 'positive' : 'negative' %>">
+                  <%= sprintf('%+.2f%%', r[:day_change] || 0) %>
                 </td>
-                <td class="negative"><%= sprintf('%.2f%%', r[:dip_from_open]) %></td>
-                <td class="positive"><%= sprintf('%+.3f%%', r[:momentum]) %></td>
-                <td><%= r[:range_position].to_i %>%</td>
+                <td class="negative"><%= sprintf('%.2f%%', r[:dip_from_open] || 0) %></td>
+                <td class="positive"><%= sprintf('%+.3f%%', r[:momentum] || 0) %></td>
+                <td><%= (r[:range_position] || 0).to_i %>%</td>
               </tr>
             <% end %>
           </tbody>
@@ -564,7 +710,6 @@ __END__
       <% end %>
     </div>
     
-    <!-- TOP MOVERS SECTION -->
     <div class="section">
       <div class="section-header">
         <span class="section-icon">🦌</span>
@@ -578,12 +723,9 @@ __END__
         <div class="tab" onclick="showTab('losers', this)">☃️ Losers</div>
       </div>
       
-      <!-- Dip Recovery Tab -->
       <div id="dip-recovery" class="tab-content active">
         <% if @movers[:dip_recoveries].empty? %>
-          <div class="empty">
-            <p>No dip-recovery patterns in top movers right now.</p>
-          </div>
+          <div class="empty"><p>No dip-recovery patterns in top movers yet.</p></div>
         <% else %>
           <table>
             <thead>
@@ -600,14 +742,10 @@ __END__
             <tbody>
               <% @movers[:dip_recoveries].each do |r| %>
                 <tr>
-                  <td class="symbol">
-                    <% if r[:star] %><span class="star">⭐ </span><% end %><%= r[:symbol] %>
-                  </td>
+                  <td class="symbol"><% if r[:star] %><span class="star">⭐ </span><% end %><%= r[:symbol] %></td>
                   <td class="name"><%= r[:name] %></td>
                   <td class="price">$<%= sprintf('%.2f', r[:price] || 0) %></td>
-                  <td class="<%= (r[:day_change] || 0) >= 0 ? 'positive' : 'negative' %>">
-                    <%= sprintf('%+.2f%%', r[:day_change] || 0) %>
-                  </td>
+                  <td class="<%= (r[:day_change] || 0) >= 0 ? 'positive' : 'negative' %>"><%= sprintf('%+.2f%%', r[:day_change] || 0) %></td>
                   <td class="negative"><%= sprintf('%.2f%%', r[:dip_from_open] || 0) %></td>
                   <td class="positive"><%= sprintf('%+.3f%%', r[:momentum] || 0) %></td>
                   <td class="market-cap"><%= format_market_cap(r[:market_cap]) %></td>
@@ -618,23 +756,12 @@ __END__
         <% end %>
       </div>
       
-      <!-- Gainers Tab -->
       <div id="gainers" class="tab-content">
         <% if @movers[:gainers].empty? %>
-          <div class="empty"><p>No gainers data available.</p></div>
+          <div class="empty"><p>No gainers data yet.</p></div>
         <% else %>
           <table>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Name</th>
-                <th>Price</th>
-                <th>Day %</th>
-                <th>Dip %</th>
-                <th>Momentum</th>
-                <th>Mkt Cap</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Symbol</th><th>Name</th><th>Price</th><th>Day %</th><th>Mkt Cap</th></tr></thead>
             <tbody>
               <% @movers[:gainers].each do |r| %>
                 <tr>
@@ -642,12 +769,6 @@ __END__
                   <td class="name"><%= r[:name] %></td>
                   <td class="price">$<%= sprintf('%.2f', r[:price] || 0) %></td>
                   <td class="positive"><%= sprintf('%+.2f%%', r[:day_change] || 0) %></td>
-                  <td class="<%= (r[:dip_from_open] || 0) < 0 ? 'negative' : '' %>">
-                    <%= sprintf('%.2f%%', r[:dip_from_open] || 0) %>
-                  </td>
-                  <td class="<%= (r[:momentum] || 0) > 0 ? 'positive' : 'negative' %>">
-                    <%= sprintf('%+.3f%%', r[:momentum] || 0) %>
-                  </td>
                   <td class="market-cap"><%= format_market_cap(r[:market_cap]) %></td>
                 </tr>
               <% end %>
@@ -656,38 +777,19 @@ __END__
         <% end %>
       </div>
       
-      <!-- Losers Tab -->
       <div id="losers" class="tab-content">
         <% if @movers[:losers].empty? %>
-          <div class="empty"><p>No losers data available.</p></div>
+          <div class="empty"><p>No losers data yet.</p></div>
         <% else %>
           <table>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Name</th>
-                <th>Price</th>
-                <th>Day %</th>
-                <th>Dip %</th>
-                <th>Momentum</th>
-                <th>Mkt Cap</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Symbol</th><th>Name</th><th>Price</th><th>Day %</th><th>Mkt Cap</th></tr></thead>
             <tbody>
               <% @movers[:losers].each do |r| %>
                 <tr>
-                  <td class="symbol">
-                    <% if r[:star] %><span class="star">⭐ </span><% end %><%= r[:symbol] %>
-                  </td>
+                  <td class="symbol"><%= r[:symbol] %></td>
                   <td class="name"><%= r[:name] %></td>
                   <td class="price">$<%= sprintf('%.2f', r[:price] || 0) %></td>
                   <td class="negative"><%= sprintf('%+.2f%%', r[:day_change] || 0) %></td>
-                  <td class="<%= (r[:dip_from_open] || 0) < 0 ? 'negative' : '' %>">
-                    <%= sprintf('%.2f%%', r[:dip_from_open] || 0) %>
-                  </td>
-                  <td class="<%= (r[:momentum] || 0) > 0 ? 'positive' : 'negative' %>">
-                    <%= sprintf('%+.3f%%', r[:momentum] || 0) %>
-                  </td>
                   <td class="market-cap"><%= format_market_cap(r[:market_cap]) %></td>
                 </tr>
               <% end %>
@@ -702,7 +804,7 @@ __END__
       <p><span class="negative">DIP %</span> = How far it dropped from open (bigger dip = better setup)</p>
       <p>RANGE = Position in today's range (0%=low, 100%=high)</p>
       <p><span class="star">⭐</span> = Best setups: big dip + strong recovery + room to run</p>
-      <p>Top Movers filtered to $10B+ market cap only</p>
+      <p>Scanning ~2400 symbols every 30 seconds</p>
     </div>
     
     <div class="footer">
