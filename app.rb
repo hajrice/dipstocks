@@ -694,7 +694,9 @@ __END__
             <% @famous.each do |r| %>
               <tr>
                 <td class="symbol">
-                  <% if r[:star] %><span class="star">⭐ </span><% end %><%= r[:symbol] %>
+                  <% if r[:star] %><span class="star">⭐ </span><% end %>
+                  <a href="https://www.google.com/search?q=$<%= r[:symbol] %>+stock" target="_blank"><%= r[:symbol] %></a>
+
                 </td>
                 <td class="price">$<%= sprintf('%.2f', r[:price] || 0) %></td>
                 <td class="<%= (r[:day_change] || 0) >= 0 ? 'positive' : 'negative' %>">
@@ -742,7 +744,13 @@ __END__
             <tbody>
               <% @movers[:dip_recoveries].each do |r| %>
                 <tr>
-                  <td class="symbol"><% if r[:star] %><span class="star">⭐ </span><% end %><%= r[:symbol] %></td>
+                  <td class="symbol">
+                    
+                      <% if r[:star] %><span class="star">⭐ </span><% end %>
+  <a href="https://www.google.com/search?q=$<%= r[:symbol] %>+stock" target="_blank"><%= r[:symbol] %></a>
+
+
+                      </td>
                   <td class="name"><%= r[:name] %></td>
                   <td class="price">$<%= sprintf('%.2f', r[:price] || 0) %></td>
                   <td class="<%= (r[:day_change] || 0) >= 0 ? 'positive' : 'negative' %>"><%= sprintf('%+.2f%%', r[:day_change] || 0) %></td>
@@ -765,7 +773,9 @@ __END__
             <tbody>
               <% @movers[:gainers].each do |r| %>
                 <tr>
-                  <td class="symbol"><%= r[:symbol] %></td>
+                  <td class="symbol">
+                    <a href="https://www.google.com/search?q=$<%= r[:symbol] %>+stock" target="_blank"><%= r[:symbol] %></a>
+                  </td>
                   <td class="name"><%= r[:name] %></td>
                   <td class="price">$<%= sprintf('%.2f', r[:price] || 0) %></td>
                   <td class="positive"><%= sprintf('%+.2f%%', r[:day_change] || 0) %></td>
@@ -786,7 +796,10 @@ __END__
             <tbody>
               <% @movers[:losers].each do |r| %>
                 <tr>
-                  <td class="symbol"><%= r[:symbol] %></td>
+                  <td class="symbol">
+                    <a href="https://www.google.com/search?q=$<%= r[:symbol] %>+stock" target="_blank"><%= r[:symbol] %></a>
+
+                  </td>
                   <td class="name"><%= r[:name] %></td>
                   <td class="price">$<%= sprintf('%.2f', r[:price] || 0) %></td>
                   <td class="negative"><%= sprintf('%+.2f%%', r[:day_change] || 0) %></td>
